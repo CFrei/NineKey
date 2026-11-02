@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct KeyboardActions {
+    let insert: (String) -> Void
+    let deleteBackward: () -> Void
+    let deleteWordBackward: () -> Void
+    let deleteWordForward: () -> Void
+    let moveCursor: (Int) -> Void
+    let moveWord: (_ forward: Bool) -> Void
+    let copy: () -> Void
+    let cut: () -> Void
+    let paste: () -> Void
+    let nextKeyboard: () -> Void
+}
+
 struct KeyboardView: View {
     static let letterRowHeight: CGFloat = 58
     static let bottomRowHeight: CGFloat = 46
@@ -8,10 +21,8 @@ struct KeyboardView: View {
     static let height = letterRowHeight * 3 + bottomRowHeight + spacing * 3 + padding * 2
 
     @ObservedObject var state: KeyboardState
-    let onInsert: (String) -> Void
-    let onDelete: () -> Void
-    let onMoveCursor: (Int) -> Void
-    let onNextKeyboard: () -> Void
+    @ObservedObject var clipboard: ClipboardHistory
+    let actions: KeyboardActions
 
     var body: some View {
         GeometryReader { geo in
@@ -22,33 +33,48 @@ struct KeyboardView: View {
             let grid = isLetters ? NineKeyLayout.letters : NineKeyLayout.numbers
 
             VStack(spacing: Self.spacing) {
-                ForEach(0..<3, id: \.self) { row in
-                    HStack(spacing: Self.spacing) {
-                        ForEach(0..<3, id: \.self) { column in
-                            LetterKeyView(
-                                key: grid[row][column],
-                                displayText: keyLabel,
-                                onAction: perform
-                            )
-                            .frame(width: letterWidth)
+                if state.showsClipboard {
+                    ClipboardPanel(
+                        items: clipboard.items,
+                        hasFullAccess: state.hasFullAccess,
+                        onSelect: { text in
+                            actions.insert(text)
+                            state.showsClipboard = false
+                        },
+                        onRemove: clipboard.remove,
+                        onClear: clipboard.clear,
+                        onClose: { state.showsClipboard = false }
+                    )
+                    .frame(height: Self.letterRowHeight * 3 + Self.spacing * 2)
+                } else {
+                    ForEach(0..<3, id: \.self) { row in
+                        HStack(spacing: Self.spacing) {
+                            ForEach(0..<3, id: \.self) { column in
+                                LetterKeyView(
+                                    key: grid[row][column],
+                                    displayText: keyLabel,
+                                    onAction: perform
+                                )
+                                .frame(width: letterWidth)
+                            }
+                            sideKey(row: row).frame(width: sideWidth)
                         }
-                        sideKey(row: row).frame(width: sideWidth)
+                        .frame(height: Self.letterRowHeight)
                     }
-                    .frame(height: Self.letterRowHeight)
                 }
 
                 HStack(spacing: Self.spacing) {
                     if state.showsGlobeKey {
-                        TapKey(isModifier: true, action: onNextKeyboard) {
+                        TapKey(isModifier: true, action: actions.nextKeyboard) {
                             Image(systemName: "globe")
                         }
                         .frame(width: sideWidth)
                     }
-                    if !isLetters {
+                    if !isLetters && !state.showsClipboard {
                         LetterKeyView(key: NineKeyLayout.zero, displayText: keyLabel, onAction: perform)
                             .frame(width: letterWidth)
                     }
-                    SpaceKey(onSpace: { insert(" ") }, onMoveCursor: onMoveCursor)
+                    SpaceKey(onSpace: { insert(" ") }, onMoveCursor: actions.moveCursor, onMoveWord: actions.moveWord)
                     TapKey(isModifier: true, action: { insert("\n") }) {
                         Image(systemName: "return")
                     }
@@ -57,6 +83,17 @@ struct KeyboardView: View {
                 .frame(height: Self.bottomRowHeight)
             }
             .padding(Self.padding)
+            .overlay(alignment: .top) {
+                if let toast = state.toast {
+                    Text(toast)
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(.regularMaterial))
+                        .padding(.top, 10)
+                        .allowsHitTesting(false)
+                }
+            }
         }
         .frame(height: Self.height)
     }
@@ -73,14 +110,25 @@ struct KeyboardView: View {
                 Color.clear
             }
         case 1:
-            TapKey(isModifier: true, action: toggleMode) {
+            ActionKey(swipes: clipboardSwipes, onTap: toggleMode) {
                 Text(state.mode == .letters ? "123" : "abc").font(.system(size: 16))
             }
         default:
-            RepeatKey(action: delete) {
-                Image(systemName: "delete.left")
-            }
+            DeleteKey(
+                onDelete: { deleting(actions.deleteBackward) },
+                onDeleteWordBackward: { deleting(actions.deleteWordBackward) },
+                onDeleteWordForward: { deleting(actions.deleteWordForward) }
+            )
         }
+    }
+
+    private var clipboardSwipes: [SwipeDirection: KeySwipe] {
+        [
+            .top: KeySwipe(systemImage: "doc.on.doc", action: actions.copy),
+            .topRight: KeySwipe(systemImage: "scissors", action: actions.cut),
+            .bottom: KeySwipe(systemImage: "doc.on.clipboard", action: actions.paste),
+            .left: KeySwipe(systemImage: "clock.arrow.circlepath", action: { state.showsClipboard = true }),
+        ]
     }
 
     private func keyLabel(_ text: String) -> String {
@@ -93,24 +141,25 @@ struct KeyboardView: View {
     // and a letter that can't take the accent gets the plain accent in front of it.
     private func insert(_ text: String) {
         guard let accent = state.pendingAccent else {
-            onInsert(text)
+            actions.insert(text)
             return
         }
         state.pendingAccent = nil
         if text == " " {
-            onInsert(accent.symbol)
+            actions.insert(accent.symbol)
         } else if let composed = accent.compose(with: text) {
-            onInsert(composed)
+            actions.insert(composed)
         } else {
-            onInsert(accent.symbol + text)
+            actions.insert(accent.symbol + text)
         }
     }
 
-    private func delete() {
+    // Any delete gesture first cancels a pending accent instead of touching the text.
+    private func deleting(_ delete: () -> Void) {
         if state.pendingAccent != nil {
             state.pendingAccent = nil
         } else {
-            onDelete()
+            delete()
         }
     }
 
@@ -128,7 +177,7 @@ struct KeyboardView: View {
         case .deadKey(let accent):
             if let pending = state.pendingAccent {
                 state.pendingAccent = nil
-                onInsert(pending.symbol)
+                actions.insert(pending.symbol)
                 if pending == accent { return }
             }
             state.pendingAccent = accent
@@ -142,12 +191,14 @@ struct KeyboardView: View {
 
 private let swipeThreshold: CGFloat = 18
 
+// Tap for the centre character, swipe for the others, or draw a small circle for the capital centre letter.
 private struct LetterKeyView: View {
     let key: LetterKey
     let displayText: (String) -> String
     let onAction: (KeyAction) -> Void
 
     @State private var isPressed = false
+    @State private var stroke = Stroke()
 
     var body: some View {
         KeyFace(isPressed: isPressed, isModifier: false) {
@@ -168,10 +219,19 @@ private struct LetterKeyView: View {
         }
         .gesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
+                .onChanged { value in
+                    if !isPressed {
+                        isPressed = true
+                        stroke.begin(at: value.startLocation)
+                    }
+                    stroke.add(value.location)
+                }
                 .onEnded { value in
                     isPressed = false
-                    if let direction = SwipeDirection(translation: value.translation, threshold: swipeThreshold) {
+                    stroke.add(value.location)
+                    if stroke.isCircle {
+                        onAction(.insert(key.center.uppercased()))
+                    } else if let direction = SwipeDirection(translation: value.translation, threshold: swipeThreshold) {
                         if let action = key.swipes[direction] {
                             onAction(action)
                         }
@@ -203,42 +263,112 @@ private struct TapKey<Label: View>: View {
     }
 }
 
-private struct RepeatKey<Label: View>: View {
+private struct KeySwipe {
+    let systemImage: String
     let action: () -> Void
+}
+
+// A modifier key with a tap action plus swipe actions, each shown as a small icon in its corner.
+private struct ActionKey<Label: View>: View {
+    let swipes: [SwipeDirection: KeySwipe]
+    let onTap: () -> Void
     @ViewBuilder let label: () -> Label
 
     @State private var isPressed = false
-    @State private var timer: Timer?
 
     var body: some View {
-        KeyFace(isPressed: isPressed, isModifier: true, content: label)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard !isPressed else { return }
-                        isPressed = true
-                        action()
-                        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                            timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { _ in
-                                action()
-                            }
-                        }
+        KeyFace(isPressed: isPressed, isModifier: true) {
+            ZStack {
+                label()
+                ForEach(Array(swipes), id: \.key) { direction, swipe in
+                    Image(systemName: swipe.systemImage)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondary)
+                        .padding(4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: direction.alignment)
+                }
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { value in
+                    isPressed = false
+                    if let direction = SwipeDirection(translation: value.translation, threshold: swipeThreshold) {
+                        swipes[direction]?.action()
+                    } else {
+                        onTap()
                     }
-                    .onEnded { _ in
-                        isPressed = false
-                        timer?.invalidate()
-                        timer = nil
-                    }
-            )
+                }
+        )
     }
 }
 
-// Tap inserts a space; dragging sideways moves the cursor one character per step.
+// Tap deletes a character, holding repeats, and swiping left/right deletes the word before/after the cursor.
+private struct DeleteKey: View {
+    let onDelete: () -> Void
+    let onDeleteWordBackward: () -> Void
+    let onDeleteWordForward: () -> Void
+
+    @State private var isPressed = false
+    @State private var isRepeating = false
+    @State private var timer: Timer?
+
+    var body: some View {
+        KeyFace(isPressed: isPressed, isModifier: true) {
+            Image(systemName: "delete.left")
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isPressed {
+                        isPressed = true
+                        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                            isRepeating = true
+                            onDelete()
+                            timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { _ in
+                                onDelete()
+                            }
+                        }
+                    }
+                    if !isRepeating && abs(value.translation.width) >= swipeThreshold {
+                        timer?.invalidate()
+                        timer = nil
+                    }
+                }
+                .onEnded { value in
+                    timer?.invalidate()
+                    timer = nil
+                    isPressed = false
+                    let wasRepeating = isRepeating
+                    isRepeating = false
+                    guard !wasRepeating else { return }
+
+                    if value.translation.width <= -swipeThreshold {
+                        onDeleteWordBackward()
+                    } else if value.translation.width >= swipeThreshold {
+                        onDeleteWordForward()
+                    } else {
+                        onDelete()
+                    }
+                }
+        )
+    }
+}
+
+// Tap inserts a space. Dragging sideways moves the cursor one character per step;
+// a diagonal swipe moves it one word (left diagonals back, right diagonals forward).
 private struct SpaceKey: View {
     let onSpace: () -> Void
     let onMoveCursor: (Int) -> Void
+    let onMoveWord: (_ forward: Bool) -> Void
+
+    private enum DragMode {
+        case undecided, cursor, wordBackward, wordForward, ignored
+    }
 
     @State private var isPressed = false
+    @State private var mode = DragMode.undecided
     @State private var cursorSteps = 0
 
     private let stepWidth: CGFloat = 12
@@ -251,18 +381,32 @@ private struct SpaceKey: View {
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     isPressed = true
-                    let steps = Int(value.translation.width / stepWidth)
-                    if steps != cursorSteps {
-                        onMoveCursor(steps - cursorSteps)
-                        cursorSteps = steps
+                    if mode == .undecided,
+                       let direction = SwipeDirection(translation: value.translation, threshold: swipeThreshold) {
+                        switch direction {
+                        case .left, .right: mode = .cursor
+                        case .topLeft, .bottomLeft: mode = .wordBackward
+                        case .topRight, .bottomRight: mode = .wordForward
+                        case .top, .bottom: mode = .ignored
+                        }
+                    }
+                    if mode == .cursor {
+                        let steps = Int(value.translation.width / stepWidth)
+                        if steps != cursorSteps {
+                            onMoveCursor(steps - cursorSteps)
+                            cursorSteps = steps
+                        }
                     }
                 }
-                .onEnded { value in
-                    isPressed = false
-                    let moved = cursorSteps != 0 || abs(value.translation.width) >= stepWidth
-                    if !moved {
-                        onSpace()
+                .onEnded { _ in
+                    switch mode {
+                    case .undecided: onSpace()
+                    case .wordBackward: onMoveWord(false)
+                    case .wordForward: onMoveWord(true)
+                    case .cursor, .ignored: break
                     }
+                    isPressed = false
+                    mode = .undecided
                     cursorSteps = 0
                 }
         )
@@ -287,7 +431,7 @@ private struct KeyFace<Content: View>: View {
     }
 }
 
-private extension Color {
+extension Color {
     static let letterKey = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark ? UIColor(white: 0.42, alpha: 1) : .white
     })

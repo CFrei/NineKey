@@ -11,6 +11,7 @@ struct ContentView: View {
                     Text("1. Open Settings › General › Keyboard › Keyboards")
                     Text("2. Tap Add New Keyboard… and choose NineKey")
                     Text("3. In any text field, tap the globe key to switch to it")
+                    Text("4. For copy, cut, paste and clipboard history, tap NineKey in that list and turn on Allow Full Access")
                     Button("Open Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) {
                             openURL(url)
