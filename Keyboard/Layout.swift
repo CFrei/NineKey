@@ -95,8 +95,8 @@ enum KeyboardMode {
 }
 
 // English MessagEase-style layout, as defined by Thumb-Key
-// (ENMessagEaseSymbols.kt and NumericENMessagEase.kt), with ä/ö/ü placed as in
-// DEMessagEaseSymbols.kt.
+// (ENMessagEaseSymbols.kt and NumericENMessagEase.kt), with d/o swapped and ä/ö/ü
+// placed as in DEMessagEaseSymbols.kt.
 enum NineKeyLayout {
     static let letters: [[LetterKey]] = [
         [
@@ -121,10 +121,10 @@ enum NineKeyLayout {
                 .topLeft: .insert("{"), .topRight: .insert("%"), .left: .insert("("),
                 .bottomLeft: .insert("["), .bottomRight: .insert("_"),
             ]),
-            LetterKey(center: "o", swipes: [
+            LetterKey(center: "d", swipes: [
                 .topLeft: .insert("q"), .top: .insert("u"), .topRight: .insert("p"),
                 .left: .insert("c"), .right: .insert("b"),
-                .bottomLeft: .insert("g"), .bottom: .insert("d"), .bottomRight: .insert("j"),
+                .bottomLeft: .insert("g"), .bottom: .insert("o"), .bottomRight: .insert("j"),
             ]),
             LetterKey(center: "r", swipes: [
                 .left: .insert("m"), .top: .shiftOn, .bottom: .shiftOff,
