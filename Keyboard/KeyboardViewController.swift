@@ -43,4 +43,5 @@ final class KeyboardViewController: UIInputViewController {
 final class KeyboardState: ObservableObject {
     @Published var showsGlobeKey = true
     @Published var isShifted = false
+    @Published var mode = KeyboardMode.letters
 }

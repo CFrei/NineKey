@@ -18,14 +18,16 @@ struct KeyboardView: View {
             let available = geo.size.width - Self.padding * 2 - Self.spacing * 3
             let letterWidth = available / 3.7
             let sideWidth = available - letterWidth * 3
+            let isLetters = state.mode == .letters
+            let grid = isLetters ? NineKeyLayout.letters : NineKeyLayout.numbers
 
             VStack(spacing: Self.spacing) {
                 ForEach(0..<3, id: \.self) { row in
                     HStack(spacing: Self.spacing) {
                         ForEach(0..<3, id: \.self) { column in
                             LetterKeyView(
-                                key: NineKeyLayout.english[row][column],
-                                isShifted: state.isShifted,
+                                key: grid[row][column],
+                                isShifted: isLetters && state.isShifted,
                                 onAction: perform
                             )
                             .frame(width: letterWidth)
@@ -36,6 +38,16 @@ struct KeyboardView: View {
                 }
 
                 HStack(spacing: Self.spacing) {
+                    if state.showsGlobeKey {
+                        TapKey(isModifier: true, action: onNextKeyboard) {
+                            Image(systemName: "globe")
+                        }
+                        .frame(width: sideWidth)
+                    }
+                    if !isLetters {
+                        LetterKeyView(key: NineKeyLayout.zero, isShifted: false, onAction: perform)
+                            .frame(width: letterWidth)
+                    }
                     SpaceKey(onSpace: { onInsert(" ") }, onMoveCursor: onMoveCursor)
                     TapKey(isModifier: true, action: { onInsert("\n") }) {
                         Image(systemName: "return")
@@ -53,16 +65,16 @@ struct KeyboardView: View {
     private func sideKey(row: Int) -> some View {
         switch row {
         case 0:
-            TapKey(isModifier: true, action: { state.isShifted.toggle() }) {
-                Image(systemName: state.isShifted ? "shift.fill" : "shift")
-            }
-        case 1:
-            if state.showsGlobeKey {
-                TapKey(isModifier: true, action: onNextKeyboard) {
-                    Image(systemName: "globe")
+            if state.mode == .letters {
+                TapKey(isModifier: true, action: { state.isShifted.toggle() }) {
+                    Image(systemName: state.isShifted ? "shift.fill" : "shift")
                 }
             } else {
                 Color.clear
+            }
+        case 1:
+            TapKey(isModifier: true, action: toggleMode) {
+                Text(state.mode == .letters ? "123" : "abc").font(.system(size: 16))
             }
         default:
             RepeatKey(action: onDelete) {
@@ -71,10 +83,16 @@ struct KeyboardView: View {
         }
     }
 
+    private func toggleMode() {
+        state.mode = state.mode == .letters ? .numbers : .letters
+        state.isShifted = false
+    }
+
     private func perform(_ action: KeyAction) {
         switch action {
-        case .insert(let text):
-            onInsert(state.isShifted ? text.uppercased() : text)
+        case .insert(let text, _):
+            let shouldCapitalize = state.isShifted && state.mode == .letters
+            onInsert(shouldCapitalize ? text.uppercased() : text)
             state.isShifted = false
         case .shiftOn:
             state.isShifted = true
@@ -101,8 +119,8 @@ private struct LetterKeyView: View {
                 ForEach(Array(key.swipes), id: \.key) { direction, action in
                     if let label = action.label {
                         Text(cased(label))
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: action.isLetter ? 13 : 11))
+                            .foregroundStyle(action.isLetter ? Color.primary.opacity(0.7) : Color.secondary.opacity(0.8))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: direction.alignment)
