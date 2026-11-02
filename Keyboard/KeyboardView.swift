@@ -27,7 +27,7 @@ struct KeyboardView: View {
                         ForEach(0..<3, id: \.self) { column in
                             LetterKeyView(
                                 key: grid[row][column],
-                                isShifted: isLetters && state.isShifted,
+                                displayText: keyLabel,
                                 onAction: perform
                             )
                             .frame(width: letterWidth)
@@ -45,11 +45,11 @@ struct KeyboardView: View {
                         .frame(width: sideWidth)
                     }
                     if !isLetters {
-                        LetterKeyView(key: NineKeyLayout.zero, isShifted: false, onAction: perform)
+                        LetterKeyView(key: NineKeyLayout.zero, displayText: keyLabel, onAction: perform)
                             .frame(width: letterWidth)
                     }
-                    SpaceKey(onSpace: { onInsert(" ") }, onMoveCursor: onMoveCursor)
-                    TapKey(isModifier: true, action: { onInsert("\n") }) {
+                    SpaceKey(onSpace: { insert(" ") }, onMoveCursor: onMoveCursor)
+                    TapKey(isModifier: true, action: { insert("\n") }) {
                         Image(systemName: "return")
                     }
                     .frame(width: sideWidth)
@@ -77,9 +77,40 @@ struct KeyboardView: View {
                 Text(state.mode == .letters ? "123" : "abc").font(.system(size: 16))
             }
         default:
-            RepeatKey(action: onDelete) {
+            RepeatKey(action: delete) {
                 Image(systemName: "delete.left")
             }
+        }
+    }
+
+    private func keyLabel(_ text: String) -> String {
+        guard state.mode == .letters, text.first?.isLetter == true else { return text }
+        let cased = state.isShifted ? text.uppercased() : text
+        return state.pendingAccent?.compose(with: cased) ?? cased
+    }
+
+    // Applies a pending dead key: "´" then "e" gives "é", "´" then space gives "´",
+    // and a letter that can't take the accent gets the plain accent in front of it.
+    private func insert(_ text: String) {
+        guard let accent = state.pendingAccent else {
+            onInsert(text)
+            return
+        }
+        state.pendingAccent = nil
+        if text == " " {
+            onInsert(accent.symbol)
+        } else if let composed = accent.compose(with: text) {
+            onInsert(composed)
+        } else {
+            onInsert(accent.symbol + text)
+        }
+    }
+
+    private func delete() {
+        if state.pendingAccent != nil {
+            state.pendingAccent = nil
+        } else {
+            onDelete()
         }
     }
 
@@ -92,8 +123,15 @@ struct KeyboardView: View {
         switch action {
         case .insert(let text, _):
             let shouldCapitalize = state.isShifted && state.mode == .letters
-            onInsert(shouldCapitalize ? text.uppercased() : text)
+            insert(shouldCapitalize ? text.uppercased() : text)
             state.isShifted = false
+        case .deadKey(let accent):
+            if let pending = state.pendingAccent {
+                state.pendingAccent = nil
+                onInsert(pending.symbol)
+                if pending == accent { return }
+            }
+            state.pendingAccent = accent
         case .shiftOn:
             state.isShifted = true
         case .shiftOff:
@@ -106,7 +144,7 @@ private let swipeThreshold: CGFloat = 18
 
 private struct LetterKeyView: View {
     let key: LetterKey
-    let isShifted: Bool
+    let displayText: (String) -> String
     let onAction: (KeyAction) -> Void
 
     @State private var isPressed = false
@@ -114,11 +152,11 @@ private struct LetterKeyView: View {
     var body: some View {
         KeyFace(isPressed: isPressed, isModifier: false) {
             ZStack {
-                Text(cased(key.center))
+                Text(displayText(key.center))
                     .font(.system(size: 26))
                 ForEach(Array(key.swipes), id: \.key) { direction, action in
                     if let label = action.label {
-                        Text(cased(label))
+                        Text(displayText(label))
                             .font(.system(size: action.isLetter ? 13 : 11))
                             .foregroundStyle(action.isLetter ? Color.primary.opacity(0.7) : Color.secondary.opacity(0.8))
                             .padding(.horizontal, 6)
@@ -142,10 +180,6 @@ private struct LetterKeyView: View {
                     }
                 }
         )
-    }
-
-    private func cased(_ text: String) -> String {
-        isShifted ? text.uppercased() : text
     }
 }
 

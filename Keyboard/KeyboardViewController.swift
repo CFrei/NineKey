@@ -44,4 +44,5 @@ final class KeyboardState: ObservableObject {
     @Published var showsGlobeKey = true
     @Published var isShifted = false
     @Published var mode = KeyboardMode.letters
+    @Published var pendingAccent: Accent?
 }

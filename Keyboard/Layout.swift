@@ -35,14 +35,43 @@ enum SwipeDirection: CaseIterable {
     }
 }
 
+enum Accent: Equatable {
+    case grave, acute, circumflex
+
+    var symbol: String {
+        switch self {
+        case .grave: "`"
+        case .acute: "´"
+        case .circumflex: "^"
+        }
+    }
+
+    private var combiningMark: String {
+        switch self {
+        case .grave: "\u{0300}"
+        case .acute: "\u{0301}"
+        case .circumflex: "\u{0302}"
+        }
+    }
+
+    /// The accented letter, or nil when no precomposed character exists (e.g. "´" + "k").
+    func compose(with text: String) -> String? {
+        guard text.count == 1, text.first?.isLetter == true else { return nil }
+        let composed = (text + combiningMark).precomposedStringWithCanonicalMapping
+        return composed.unicodeScalars.count == 1 ? composed : nil
+    }
+}
+
 enum KeyAction: Equatable {
     case insert(String, display: String? = nil)
+    case deadKey(Accent)
     case shiftOn
     case shiftOff
 
     var label: String? {
         switch self {
         case .insert(let text, let display): display ?? text
+        case .deadKey(let accent): accent.symbol
         case .shiftOn: "⇧"
         case .shiftOff: nil
         }
@@ -66,17 +95,18 @@ enum KeyboardMode {
 }
 
 // English MessagEase-style layout, as defined by Thumb-Key
-// (ENMessagEaseSymbols.kt and NumericENMessagEase.kt).
+// (ENMessagEaseSymbols.kt and NumericENMessagEase.kt), with ä/ö/ü placed as in
+// DEMessagEaseSymbols.kt.
 enum NineKeyLayout {
     static let letters: [[LetterKey]] = [
         [
             LetterKey(center: "a", swipes: [
-                .bottomRight: .insert("v"),
+                .bottomRight: .insert("v"), .bottom: .insert("ä"),
                 .right: .insert("-"), .bottomLeft: .insert("$"),
             ]),
             LetterKey(center: "n", swipes: [
                 .bottom: .insert("l"),
-                .topLeft: .insert("`"), .top: .insert("^"), .topRight: .insert("´"),
+                .topLeft: .deadKey(.grave), .top: .deadKey(.circumflex), .topRight: .deadKey(.acute),
                 .left: .insert("+"), .right: .insert("!"),
                 .bottomLeft: .insert("/"), .bottomRight: .insert("\\"),
             ]),
@@ -87,7 +117,7 @@ enum NineKeyLayout {
         ],
         [
             LetterKey(center: "h", swipes: [
-                .right: .insert("k"),
+                .right: .insert("k"), .top: .insert("ü"), .bottom: .insert("ö"),
                 .topLeft: .insert("{"), .topRight: .insert("%"), .left: .insert("("),
                 .bottomLeft: .insert("["), .bottomRight: .insert("_"),
             ]),
