@@ -19,9 +19,11 @@ struct KeyboardView: View {
     static let spacing: CGFloat = 6
     static let padding: CGFloat = 6
     static let height = letterRowHeight * 3 + bottomRowHeight + spacing * 3 + padding * 2
+    static let coordinateSpace = "keyboard"
 
     @ObservedObject var state: KeyboardState
     @ObservedObject var clipboard: ClipboardHistory
+    let feedback: KeyFeedback
     let actions: KeyboardActions
 
     var body: some View {
@@ -33,18 +35,30 @@ struct KeyboardView: View {
             let grid = isLetters ? NineKeyLayout.letters : NineKeyLayout.numbers
 
             VStack(spacing: Self.spacing) {
-                if state.showsClipboard {
-                    ClipboardPanel(
-                        items: clipboard.items,
-                        hasFullAccess: state.hasFullAccess,
-                        onSelect: { text in
-                            actions.insert(text)
-                            state.showsClipboard = false
-                        },
-                        onRemove: clipboard.remove,
-                        onClear: clipboard.clear,
-                        onClose: { state.showsClipboard = false }
-                    )
+                if let panel = state.panel {
+                    Group {
+                        switch panel {
+                        case .clipboard:
+                            ClipboardPanel(
+                                items: clipboard.items,
+                                hasFullAccess: state.hasFullAccess,
+                                onSelect: { text in
+                                    actions.insert(text)
+                                    state.panel = nil
+                                },
+                                onRemove: clipboard.remove,
+                                onClear: clipboard.clear,
+                                onClose: { state.panel = nil }
+                            )
+                        case .haptics:
+                            HapticsPanel(
+                                settings: feedback.settings,
+                                hasFullAccess: state.hasFullAccess,
+                                preview: feedback.play,
+                                onClose: { state.panel = nil }
+                            )
+                        }
+                    }
                     .frame(height: Self.letterRowHeight * 3 + Self.spacing * 2)
                 } else {
                     ForEach(0..<3, id: \.self) { row in
@@ -70,7 +84,7 @@ struct KeyboardView: View {
                         }
                         .frame(width: sideWidth)
                     }
-                    if !isLetters && !state.showsClipboard {
+                    if !isLetters && state.panel == nil {
                         LetterKeyView(key: NineKeyLayout.zero, displayText: keyLabel, onAction: perform)
                             .frame(width: letterWidth)
                     }
@@ -82,6 +96,11 @@ struct KeyboardView: View {
                 }
                 .frame(height: Self.bottomRowHeight)
             }
+            .coordinateSpace(name: Self.coordinateSpace)
+            .onPreferenceChange(KeyFramesKey.self) { frames in
+                feedback.keyFrames = frames
+            }
+            .environment(\.keyFeedback, feedback)
             .padding(Self.padding)
             .overlay(alignment: .top) {
                 if let toast = state.toast {
@@ -127,7 +146,8 @@ struct KeyboardView: View {
             .top: KeySwipe(systemImage: "doc.on.doc", action: actions.copy),
             .topRight: KeySwipe(systemImage: "scissors", action: actions.cut),
             .bottom: KeySwipe(systemImage: "doc.on.clipboard", action: actions.paste),
-            .left: KeySwipe(systemImage: "clock.arrow.circlepath", action: { state.showsClipboard = true }),
+            .left: KeySwipe(systemImage: "clock.arrow.circlepath", action: { state.panel = .clipboard }),
+            .right: KeySwipe(systemImage: "gearshape", action: { state.panel = .haptics }),
         ]
     }
 
@@ -240,6 +260,7 @@ private struct LetterKeyView: View {
                     }
                 }
         )
+        .keyFeedback()
     }
 }
 
@@ -260,6 +281,7 @@ private struct TapKey<Label: View>: View {
                         action()
                     }
             )
+            .keyFeedback()
     }
 }
 
@@ -301,6 +323,7 @@ private struct ActionKey<Label: View>: View {
                     }
                 }
         )
+        .keyFeedback()
     }
 }
 
@@ -353,6 +376,7 @@ private struct DeleteKey: View {
                     }
                 }
         )
+        .keyFeedback()
     }
 }
 
@@ -410,6 +434,62 @@ private struct SpaceKey: View {
                     cursorSteps = 0
                 }
         )
+        .keyFeedback()
+    }
+}
+
+private struct KeyFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+// Reports the key's position on the keyboard, vibrates when it's touched, and vibrates again
+// each time the same touch slides onto a different key (gaps between keys are ignored).
+private struct KeyFeedbackModifier: ViewModifier {
+    @Environment(\.keyFeedback) private var feedback
+    @State private var id = UUID()
+    @State private var isTouching = false
+    @State private var currentKey: UUID?
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: KeyFramesKey.self,
+                        value: [id: geo.frame(in: .named(KeyboardView.coordinateSpace))]
+                    )
+                }
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(KeyboardView.coordinateSpace))
+                    .onChanged { value in
+                        guard let feedback else { return }
+                        guard isTouching else {
+                            isTouching = true
+                            currentKey = id
+                            feedback.keyPressed()
+                            return
+                        }
+                        if let key = feedback.key(at: value.location), key != currentKey {
+                            currentKey = key
+                            feedback.enteredKey()
+                        }
+                    }
+                    .onEnded { _ in
+                        isTouching = false
+                        currentKey = nil
+                    }
+            )
+    }
+}
+
+private extension View {
+    func keyFeedback() -> some View {
+        modifier(KeyFeedbackModifier())
     }
 }
 

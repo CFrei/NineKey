@@ -4,6 +4,7 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
     private let state = KeyboardState()
     private let clipboard = ClipboardHistory()
+    private let feedback = KeyFeedback(settings: HapticSettings())
     private var toastDismissal: DispatchWorkItem?
 
     private var proxy: UITextDocumentProxy { textDocumentProxy }
@@ -24,7 +25,8 @@ final class KeyboardViewController: UIInputViewController {
             nextKeyboard: { [weak self] in self?.advanceToNextInputMode() }
         )
 
-        let host = UIHostingController(rootView: KeyboardView(state: state, clipboard: clipboard, actions: actions))
+        let keyboardView = KeyboardView(state: state, clipboard: clipboard, feedback: feedback, actions: actions)
+        let host = UIHostingController(rootView: keyboardView)
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
 
@@ -139,8 +141,12 @@ final class KeyboardState: ObservableObject {
     @Published var isShifted = false
     @Published var mode = KeyboardMode.letters
     @Published var pendingAccent: Accent?
-    @Published var showsClipboard = false
+    @Published var panel: KeyboardPanel?
     @Published var toast: String?
+}
+
+enum KeyboardPanel {
+    case clipboard, haptics
 }
 
 private extension String {
